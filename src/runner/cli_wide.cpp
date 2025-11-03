@@ -6,6 +6,7 @@
 *  \date 2025-06-24
 *  \version 0.9.16
 */
+#ifdef _WIN32
 #include "cli_wide.hpp"
 #include <chrono>
 #include <cstdint>
@@ -1275,3 +1276,4 @@ void CLIWide::handle_backspace_with_wrapping(InputState& state) {
         }
     }
 } 
+#endif // _WIN32
