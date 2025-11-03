@@ -55,7 +55,7 @@ size_t write_data_to_string(void* ptr, size_t size, size_t nmemb, std::string* u
 /// \param ultotal the total upload size
 /// \param ulnow the current upload size
 /// \return the progress
-int progress_callback(void* clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
+int xferinfo_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
     if (dltotal > 0) {
         using Clock = std::chrono::steady_clock;
         static Clock::time_point last_print_time = Clock::now();
@@ -66,7 +66,9 @@ int progress_callback(void* clientp, double dltotal, double dlnow, double ultota
         double percentage = (dlnow / dltotal) * 100.0;
 
         if (elapsed.count() >= 1000) {
+#ifdef _WIN32
             utils::enable_ansi_on_windows_once();
+#endif
 
             double percentage = (dlnow / dltotal) * 100.0;
             double mb_now = dlnow / 1024.0 / 1024.0;
@@ -126,7 +128,7 @@ bool download_file(const std::string& url, const std::string& local_path,
     // Set progress callback if provided
     if (progress_cb) {
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, progress_callback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_callback);
     }
 
     CURLcode res = curl_easy_perform(curl);
