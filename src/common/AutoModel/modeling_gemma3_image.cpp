@@ -198,7 +198,6 @@ bytes Gemma3::load_image(const std::string& filename) {
                 if (frame) av_frame_free(&frame);
                 if (packet) av_packet_free(&packet);
                 if (codecContext) {
-                    avcodec_close(codecContext);
                     avcodec_free_context(&codecContext);
                 }
                 return result;
@@ -223,7 +222,6 @@ bytes Gemma3::load_image(const std::string& filename) {
             av_packet_free(&packet);
         }
         if (codecContext) {
-            avcodec_close(codecContext);
             avcodec_free_context(&codecContext);
         }
 
@@ -364,7 +362,6 @@ bytes Gemma3::load_image_base64(const std::string& base64_string) {
                 if (frame) av_frame_free(&frame);
                 if (packet) av_packet_free(&packet);
                 if (codecContext) {
-                    avcodec_close(codecContext);
                     avcodec_free_context(&codecContext);
                 }
                 return result;
