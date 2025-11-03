@@ -145,6 +145,7 @@ inline time_with_unit re_unit(time_with_unit time){
 
 namespace utils {
 
+#ifdef _WIN32
 inline void enable_ansi_on_windows_once() {
     static bool done = false;
     if (done) return;
@@ -156,6 +157,7 @@ inline void enable_ansi_on_windows_once() {
     SetConsoleMode(hOut, mode);
     done = true;
 }
+#endif
 
 /// \brief get a random float
 /// \param min the minimum value
