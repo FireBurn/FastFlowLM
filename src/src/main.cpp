@@ -16,15 +16,23 @@
 #include <string>
 #include <thread>
 #include <atomic>
-#include <windows.h>
 #include <filesystem>
-#include <shlobj.h>
 #include <cstdlib>
-#include <shellapi.h>
 #include "utils/vm_args.hpp"
 #include <boost/program_options.hpp>
 
 #include "AutoModel/automodel.hpp"
+
+#ifdef _WIN32
+#include "utils/utils.hpp"
+#include <windows.h>
+#include <shlobj.h>
+#include <shellapi.h>
+#else
+#include <unistd.h> // for readlink
+#include <sys/resource.h> // for setpriority
+#include <limits.h> // for PATH_MAX
+#endif
 
 // Global variables
 ///@brief should_exit is used to control the server thread
@@ -33,6 +41,7 @@ std::atomic<bool> should_exit(false);
 ///@brief get_unicode_command_line_args gets Unicode command line arguments
 ///@param argc_out reference to store argument count
 ///@return vector of UTF-8 encoded argument strings
+#ifdef _WIN32
 std::vector<std::string> get_unicode_command_line_args(int& argc_out) {
     std::vector<std::string> args;
     
@@ -68,10 +77,13 @@ std::vector<std::string> get_unicode_command_line_args(int& argc_out) {
     
     return args;
 }
+#endif
 
 ///@brief get_executable_directory gets the directory where the executable is located
 ///@return the executable directory path
+namespace utils {
 std::string get_executable_directory() {
+#ifdef _WIN32
     char buffer[MAX_PATH];
     GetModuleFileNameA(NULL, buffer, MAX_PATH);
     std::string exe_path(buffer);
@@ -79,29 +91,52 @@ std::string get_executable_directory() {
     if (last_slash != std::string::npos) {
         return exe_path.substr(0, last_slash);
     }
+#else
+    char result[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+    std::string exe_path = std::string(result, (count > 0) ? count : 0);
+    return std::filesystem::path(exe_path).parent_path().string();
+#endif
     return ".";
 }
 
 ///@brief get_user_documents_directory gets the user's Documents directory
 ///@return the user's Documents directory path
 std::string get_user_documents_directory() {
+#ifdef _WIN32
     char buffer[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, buffer))) {
         return std::string(buffer);
     }
     // Fallback to executable directory if Documents folder cannot be found
     return get_executable_directory();
+#else
+    const char* home = getenv("HOME");
+    if (home) {
+        return std::string(home);
+    }
+    return "."; // Fallback
+#endif
 }
 
+} // namespace utils
 ///@brief ensure_models_directory creates the models directory if it doesn't exist
 ///@param exe_dir the executable directory
 void ensure_models_directory(const std::string& exe_dir) {
+#ifdef _WIN32
     // Use Documents directory for models instead of executable directory
-    std::string documents_dir = get_user_documents_directory();
-    std::string models_dir = documents_dir + "/flm/models";
+    std::string documents_dir = utils::get_user_documents_directory();
+    std::string models_dir = documents_dir + "\\flm\\models";
     if (!std::filesystem::exists(models_dir)) {
         std::filesystem::create_directories(models_dir);
     }
+#else
+    const char* home_dir = getenv("HOME");
+    std::string models_dir = (home_dir ? std::string(home_dir) : ".") + "/.local/share/flm/models";
+    if (!std::filesystem::exists(models_dir)) {
+        std::filesystem::create_directories(models_dir);
+    }
+#endif
 }
 
 ///@brief handle_user_input is used to handle the user input
@@ -132,18 +167,27 @@ int get_server_port(int user_port) {
         return user_port;
     }
     else {
+#ifdef _WIN32
         char* port_env = nullptr;
         size_t len = 0;
         if (_dupenv_s(&port_env, &len, "FLM_SERVE_PORT") == 0 && port_env != nullptr) {
+#else
+        const char* port_env = getenv("FLM_SERVE_PORT");
+        if (port_env != nullptr) {
+#endif
             try {
                 int port = std::stoi(port_env);
+#ifdef _WIN32
                 free(port_env);
+#endif
                 if (port > 0 && port <= 65535) {
                     return port;
                 }
             }
             catch (const std::exception&) {
+#ifdef _WIN32
                 free(port_env);
+#endif
                 // Invalid port number, use default
             }
         }
@@ -155,18 +199,25 @@ int get_server_port(int user_port) {
 ///@brief get_models_directory gets the models directory from environment variable or defaults to Documents
 ///@return the models directory path
 std::string get_models_directory() {
+#ifdef _WIN32
     char* model_path_env = nullptr;
     size_t len = 0;
     if (_dupenv_s(&model_path_env, &len, "FLM_MODEL_PATH") == 0 && model_path_env != nullptr) {
+#else
+    const char* model_path_env = getenv("FLM_MODEL_PATH");
+    if (model_path_env != nullptr) {
+#endif
         std::string custom_path(model_path_env);
+#ifdef _WIN32
         free(model_path_env);
+#endif
         if (!custom_path.empty()) {
             return custom_path;
         }
     }
     // Fallback to Documents directory if environment variable is not set
-    std::string documents_dir = get_user_documents_directory();
-    return documents_dir + "/flm/models";
+    std::string documents_dir = utils::get_user_documents_directory();
+    return documents_dir + "/flm/models"; // Use forward slash for consistency
 }
 
 ///@brief main function
@@ -174,8 +225,10 @@ std::string get_models_directory() {
 ///@param argv the arguments
 ///@return the exit code
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+#endif
     
     // Parse command line arguments using Boost Program Options
     arg_utils::ParsedArgs parsed_args;
@@ -214,8 +267,14 @@ int main(int argc, char* argv[]) {
     bool embed = parsed_args.embed;
 
     // Set process priority to high for better performance
+#ifdef _WIN32
     SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-    
+#else
+    // On Linux, nice() returns the new priority, or -1 on error.
+    // A lower nice value means higher priority.
+    setpriority(PRIO_PROCESS, 0, -10); // Set a higher priority
+#endif
+
     // Handle special case for serve command - use default tag if none provided
     if (command == "serve" && tag.empty()) {
         tag = "llama3.2:1b"; // Use default tag
@@ -232,9 +291,11 @@ int main(int argc, char* argv[]) {
         // Configure AMD XRT for the specified power mode
         if (power_mode == "default" || power_mode == "powersaver" || power_mode == "balanced" || 
             power_mode == "performance" || power_mode == "turbo") {
+#ifdef _WIN32
             std::string xrt_cmd = "cd \"C:\\Windows\\System32\\AMD\" && .\\xrt-smi.exe configure --pmode " + power_mode + " > NUL 2>&1";
             header_print("FLM", "Configuring NPU Power Mode to " + power_mode + (got_power_mode ? "" : " (flm default)"));
             system(xrt_cmd.c_str());
+#endif
         }
         else{
             std::cout << "Invalid power mode: " << power_mode << std::endl;
@@ -248,14 +309,19 @@ int main(int argc, char* argv[]) {
     }
 
     // Get the command, model tag, and force flag
-    std::string exe_dir = get_executable_directory();
-    std::string config_path = exe_dir + "/model_list.json";
+    std::string exe_dir = utils::get_executable_directory();
+    std::string config_path;
+    #ifdef _WIN32
+    config_path = exe_dir + "/model_list.json";
+    #else
+    config_path = exe_dir + "/../model_list.json"; // Assuming it's in the root of the project, not src
+    #endif
 
     try {
         // Get the models directory from environment variable or default
         std::string models_dir = get_models_directory();
         
-        // Load the model list with the models directory as the base
+        // Load the model list
         model_list supported_models(config_path, models_dir);
         ModelDownloader downloader(supported_models);
 
@@ -271,7 +337,7 @@ int main(int argc, char* argv[]) {
 
         } else if (command == "serve") {
             check_and_notify_new_version();
-            // Create the server
+             // Create the server
             int port = get_server_port(user_port);
             auto server = create_lm_server(supported_models, downloader, tag, asr, embed, port, ctx_length, cors, preemption);
             server->set_max_connections(max_socket_connections);           // Allow up to 10 concurrent connections
@@ -358,48 +424,3 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 }
-
-//int main(int argc, char* argv[])
-//{
-//    //check_and_notify_new_version();
-//    std::string exe_dir = get_executable_directory();
-//    std::string config_path = exe_dir + "/model_list.json";
-//    std::string models_dir = get_models_directory();
-//
-//    chat_meta_info_t a;
-//
-//    std::string tag = "gpt-oss";
-//    model_list supported_models(config_path, models_dir);
-//    ModelDownloader downloader(supported_models);
-//    //Runner runner(supported_models, downloader, tag, -1, 0);
-//    std::pair<std::string, std::unique_ptr<AutoModel>> auto_model = get_auto_model(tag);
-//    std::unique_ptr<AutoModel> auto_chat_engine = std::move(auto_model.second);
-//    tag = auto_model.first;
-//    auto_chat_engine->load_model(supported_models.get_model_path(tag), supported_models.get_model_info(tag), -1, 0);
-//
-//
-//    lm_uniform_input_t input;
-//    input.prompt = "hi how are you?";
-//    nlohmann::ordered_json messages;
-//    messages.push_back({ {"role", "user"}, {"content", input.prompt} });
-//    std::string templated_text = auto_chat_engine->apply_chat_template(messages);
-//    auto_chat_engine->insert(a, input);
-//    //std::cout << templated_text << std::endl;
-//}
-
-//int main(int argc, char* argv[])
-//{
-//    std::string tag = "qwen3:0.6b"; // User Input
-//    std::string exe_dir = get_executable_directory();
-//    std::string config_path = exe_dir + "/model_list.json";
-//    std::string models_dir = get_models_directory();
-//    //std::cout << exe_dir << std::endl; // C:\Users\nock9\Projects\FastFlowLM\out
-//    //std::cout << models_dir << std::endl; // C:\Users\nock9\Documents\flm
-//
-//    model_list supported_models(config_path, models_dir);
-//    ModelDownloader downloader(supported_models);
-//    Runner runner(supported_models, downloader, tag);
-//    runner.run();
-//
-//    return 0;
-//}

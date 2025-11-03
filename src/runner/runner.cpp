@@ -90,7 +90,9 @@ void Runner::run() {
     this->system_prompt = "";
     this->auto_chat_engine->configure_parameter("system_prompt", this->system_prompt);
     std::wstring_convert<std::codecvt_utf8<wchar_t>> utf8conv;
+#ifdef _WIN32
     wstream_buf obuf(std::cout);
+#endif
     std::ostream base_ostream(&obuf);
     header_print("FLM", "Type /? for help");
     int empty_line_count = 0;
@@ -109,14 +111,17 @@ void Runner::run() {
         }
 
         // Convert line (UTF-8 bytes) → wide string (Unicode codepoints)
+#ifdef _WIN32
         std::wstring winput = utf8conv.from_bytes(input);
 
         // Split on *any* Unicode whitespace
         std::wistringstream wiss(winput);
         std::wstring wtoken;
+#endif
         std::vector<std::string> input_list;
         std::cout << std::endl;
 
+#ifdef _WIN32
         while (wiss >> wtoken) {
             // Convert each token back → UTF-8 bytes
             input_list.push_back(utf8conv.to_bytes(wtoken));
@@ -126,6 +131,13 @@ void Runner::run() {
         if (input_list.empty()) {
             continue;
         }
+#else
+        std::stringstream ss(input);
+        std::string token;
+        while(ss >> token) {
+            input_list.push_back(token);
+        }
+#endif
         
         // For commands, we only need to check the first token
         std::string first_token = input_list[0];
@@ -252,14 +264,21 @@ void Runner::run() {
                     }
 
                 }
+#ifdef _WIN32
                 else{
                     std::wifstream file(utf8_to_wstring(filename));
                     //std::ifstream file(filename);
                     if (!file.is_open()) {
+#else
+                else {
+                    std::ifstream file(filename);
+                    if (!file.is_open()) {
+#endif
                         header_print("FLM", "Error: Could not open file: " << filename);
                         header_print("FLM", "Please check if the file exists and is readable.");
                         continue;
                     }
+#ifdef _WIN32
                     file.imbue(std::locale(file.getloc(), new std::codecvt_utf8<wchar_t>));  // treat file content as UTF-8
                     std::wstring file_content_original((std::istreambuf_iterator<wchar_t>(file)), std::istreambuf_iterator<wchar_t>());
                     std::string file_content = utf8conv.to_bytes(file_content_original);
@@ -267,6 +286,11 @@ void Runner::run() {
                     input = file_content + "\n";
                     std::cout << std::endl;
                 }
+#else
+                    std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                    input = file_content + "\n";
+                }
+#endif
                 if (last_file_name_idx < input_list.size() - 1) {
                     for (int i = last_file_name_idx + 1; i < input_list.size() - 1; i++) {
                         input += input_list[i] + " ";
@@ -354,19 +378,24 @@ void Runner::cmd_load(std::vector<std::string>& input_list) {
 /// \param input_list, std::vector<std::string>
 void Runner::cmd_save(std::vector<std::string>& input_list) {
     std::pair<std::string, std::vector<int>> history = this->auto_chat_engine->get_history();
+#ifdef _WIN32
     // Get the FLM_MODEL_PATH environment variable for the history directory
     std::string history_dir;
     char* model_path_env = nullptr;
     size_t len = 0;
     if (_dupenv_s(&model_path_env, &len, "FLM_MODEL_PATH") == 0 && model_path_env != nullptr) {
-        history_dir = std::string(model_path_env) + "\\history";
+        history_dir = std::string(model_path_env) + "/history";
         free(model_path_env);
     } else {
         // Fallback to Documents directory if environment variable is not set
         std::string documents_dir = utils::get_user_documents_directory();
-        history_dir = documents_dir + "\\flm\\history";
+        history_dir = documents_dir + "/flm/history";
     }
-    
+#else
+    const char* model_path_env = getenv("FLM_MODEL_PATH");
+    std::string history_dir = (model_path_env ? std::string(model_path_env) : (std::string(getenv("HOME")) + "/.local/share/flm")) + "/history";
+#endif
+
     // Create the history directory if it doesn't exist
     if (!std::filesystem::exists(history_dir)) {
         std::filesystem::create_directories(history_dir);
@@ -390,7 +419,7 @@ void Runner::cmd_save(std::vector<std::string>& input_list) {
     std::string date_str = date_ss.str();
 
     // 2) build filename in the history directory
-    std::string file_name = history_dir + "\\history_" + date_str + ".txt";
+    std::string file_name = history_dir + "/history_" + date_str + ".txt";
     std::ofstream file(file_name);
     if (file.is_open()) {
         file << history.first << std::endl;
@@ -526,5 +555,3 @@ void Runner::cmd_help(std::vector<std::string>& input_list) {
 void Runner::cmd_help_shotcut(std::vector<std::string>& input_list) {
     std::cout << "Help shotcut" << std::endl;
 }
-
-

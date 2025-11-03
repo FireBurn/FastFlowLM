@@ -100,7 +100,7 @@ inline time_with_unit cast_to_ms(time_with_unit time){
     else{
         return time;
     }
-}   
+}
 
 /// \brief cast to seconds
 /// \param time the time
@@ -121,7 +121,7 @@ inline time_with_unit cast_to_s(time_with_unit time){
     else{
         return time;
     }
-}   
+}
 
 /// \brief re-unit the time
 /// \param time the time
@@ -333,17 +333,13 @@ inline bool check_file_exists(std::string name) {
     return file.good();
 }
 
-#ifdef _WIN32
+/// \brief get the executable directory
+/// \return the executable directory path
+std::string get_executable_directory();
+
 /// \brief get the user's Documents directory on Windows
 /// \return the user's Documents directory path
-inline std::string get_user_documents_directory() {
-    char buffer[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, buffer))) {
-        return std::string(buffer);
-    }
-    // Fallback to current directory if Documents folder cannot be found
-    return ".";
-}
-#endif
+std::string get_user_documents_directory();
+
 
 } // end of namespace utils
