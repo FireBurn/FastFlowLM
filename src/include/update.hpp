@@ -6,6 +6,7 @@
 *  \date 2025-09-24
 *  \version 0.9.16
 */
+#ifdef _WIN32
 
 #include <windows.h>
 #include <winhttp.h>
@@ -215,3 +216,9 @@ static void check_and_notify_new_version() {
     }
 }
 
+#else
+
+// No-op for non-Windows platforms
+static void check_and_notify_new_version() {}
+
+#endif // _WIN32
