@@ -92,8 +92,10 @@ void Runner::run() {
     std::wstring_convert<std::codecvt_utf8<wchar_t>> utf8conv;
 #ifdef _WIN32
     wstream_buf obuf(std::cout);
-#endif
     std::ostream base_ostream(&obuf);
+#else
+    std::ostream& base_ostream = std::cout;
+#endif
     header_print("FLM", "Type /? for help");
     int empty_line_count = 0;
     bool is_image = false;
